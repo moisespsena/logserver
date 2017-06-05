@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Log Server</title>
+    <style type="text/css">
+        ._e {
+            color: #820f0f
+
+        }
+        ._i {
+            color: #2a5396
+        }
+
+        #log div {
+            border-bottom: 1px solid #ccc;
+        }
+    </style>
+
+    <!-- Bootstrap -->
+    <link href="{{.STATIC_URL}}/bootstrap/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- HTML5 shim and Respond.js for IE8 support of HTML5 elements and media queries -->
+    <!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
+    <!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/html5shiv/3.7.3/html5shiv.min.js"></script>
+      <script src="https://oss.maxcdn.com/respond/1.4.2/respond.min.js"></script>
+    <![endif]-->
+</head>
+<body>
+    <nav class="navbar navbar-default navbar-fixed-top navbar-inverse" >
+      <div class="container-fluid">
+        <div class="navbar-header">
+          <a href="#" class="navbar-brand">Monitorando '{{.fileName}}'</a>
+        </div>
+      </div>
+    </nav>
+              <nav class="navbar navbar-default navbar-fixed-top" style="margin-top: 51px">
+                <div class="container-fluid">
+                  <div class="navbar-header">
+                    <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar-collapse-1" aria-expanded="false">
+                      <span class="sr-only">Toggle navigation</span>
+                      <span class="icon-bar"></span>
+                      <span class="icon-bar"></span>
+                      <span class="icon-bar"></span>
+                    </button>
+                    <a class="navbar-brand" href="#">Filtro: </a>
+                  </div>
+
+                  <div class="collapse navbar-collapse" id="navbar-collapse-1">
+                    <ul id="filter" class="nav navbar-nav">
+                      <li role="presentation" class="active" data-filter="*"><a href="javascript:void(0);">Tudo</a></li>
+                      <li role="presentation" data-filter="i"><a href="javascript:void(0);"><span class="glyphicon glyphicon-ok text-info" aria-hidden="true"></span> Nomal</a></li>
+                      <li role="presentation" data-filter="e"><a href="javascript:void(0);"><span class="glyphicon glyphicon-exclamation-sign text-danger" aria-hidden="true"></span> Erro</a></li>
+                    </ul>
+
+                    <ul class="nav navbar-nav navbar-right">
+                      <li><span class="navbar-brand">Monitoramento: </span></li>
+                      <li>
+                         <button id="start" href="javascript:void(0);" class="btn btn-success navbar-btn"><span class="glyphicon glyphicon-play" aria-hidden="true"></span> Iniciar</button>
+                         <button id="stop" href="javascript:void(0);" class="btn btn-danger navbar-btn"><span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Parar</button>
+                      </li>
+                      <li>&nbsp;</li>
+
+                    </ul>
+                  </div>
+                </div>
+              </nav>
+
+    <div class="container-fluid" style="margin-top: 110px">
+          <pre id="log"></pre>
+    </div>
+
+    <script type="text/javascript" src="{{.STATIC_URL}}/jquery.min.js"></script>
+    <script src="{{.STATIC_URL}}/bootstrap/js/bootstrap.min.js"></script>
+    <script type="text/javascript">
+        var MESSAGE_FORMATTER = [
+            function(msg) {
+                var style = FILTER.i ? ' style="display:none"' : '';
+                return '<div class="_i"'+style+'>' + msg + '</div>'
+            },
+            function(msg) {
+                var style = FILTER.e ? ' style="display:none"' : '';
+                return '<div class="_e"'+style+'>' + msg + '</div>'
+            },
+            function(msg) {
+                var style = FILTER.e ? ' style="display:none"' : '';
+                return '<div class="_e"'+style+'>' + msg + '</div>'
+            },
+            function(msg) {
+                _close();
+                return ''
+            }
+        ];
+
+        var FILTER = {
+            i: false,
+            e: false
+        }
+
+        function _close() {
+             window.theSocket.close();
+             $('#start').show();
+             $('#stop').hide();
+        }
+
+        function _start() {
+            if (window.theSocket) return;
+
+            var ws, $status = $('#status');
+            if (window.WebSocket === undefined) {
+                $("#log").append("Your browser does not support WebSockets");
+                return;
+            } else {
+                var socket = window.theSocket = new WebSocket('{{.WS_URL}}'),
+                    container = $("#log")
+                socket.onopen = function() {
+                    $status.html("Conexão iniciada.");
+                };
+                socket.onmessage = function (e) {
+                    var msg = MESSAGE_FORMATTER[e.data[0]](e.data.substring(1));
+                    if (msg != '')
+                        container.append(msg);
+                }
+                socket.onclose = function () {
+                    $status.html("Conexão encerrada");
+                    window.theSocket = null;
+                }
+            }
+
+            $('#start').hide();
+            $('#stop').show();
+        }
+
+        $(function () {
+            var $log = $("#log");
+            $('#stop').hide().click(function() {
+                if (window.theSocket) _close();
+            });
+
+            $('#start').click(function() {
+                if (!window.theSocket) _start();
+            });
+
+            $('#filter').children().click(function() {
+                var $this = $(this);
+                $this.siblings().removeClass('active');
+                $this.addClass('active');
+                var filterValue = $this.data('filter');
+
+                if(filterValue == '*') {
+                    FILTER.e = FILTER.i = false;
+                    $log.children().show();
+                } else if(filterValue == 'e') {
+                    FILTER.i = true;
+                    FILTER.e = false;
+                    $log.children('._e').show();
+                    $log.children('._i').hide();
+                } else if(filterValue == 'i') {
+                    FILTER.e = true;
+                    FILTER.i = false;
+                    $log.children('._i').show();
+                    $log.children('._e').hide();
+                 }
+            });
+        });
+    </script>
+</body>
+</html>
