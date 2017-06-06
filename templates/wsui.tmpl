@@ -92,7 +92,11 @@
             function(msg) {
                 _close();
                 return ''
-            }
+            },
+             function(msg) {
+                 var style = FILTER.e ? ' style="display:none"' : '';
+                 return '<div class="_e"'+style+'>' + msg + '</div>'
+             }
         ];
 
         var FILTER = {

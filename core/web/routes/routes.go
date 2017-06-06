@@ -3,21 +3,23 @@ package routes
 import (
 	"gopkg.in/macaron.v1"
 	"github.com/go-macaron/sockets"
-	"log"
-	"github.com/moisespsena/logserver/core/types"
+	"github.com/moisespsena/logserver/core"
 	"strings"
 	"github.com/gorilla/websocket"
 	"time"
+	"fmt"
 )
 
-func Init(G *types.Global, m *macaron.Macaron) {
-	m.Get(G.Route("/favicon.ico"), func(ctx *macaron.Context) (int, string) {
+func Init(s *core.LogServer, m *macaron.Macaron) {
+	log := core.Log
+
+	m.Get(s.Route("/favicon.ico"), func(ctx *macaron.Context) (int, string) {
 		return 404, "Not Found"
 	})
 
-	m.Get(G.Route("/file/:fileName"), func(ctx *macaron.Context) {
+	m.Get(s.Route("/file/:fileName"), func(ctx *macaron.Context) {
 		fileName := ctx.Params(":fileName")
-		rootUrl := strings.Replace(G.ServerUrl, "HOST", ctx.Req.Host, 1)
+		rootUrl := strings.Replace(s.ServerUrl, "HOST", ctx.Req.Host, 1)
 		ctx.Data["ROOT_URL"] = rootUrl
 		ctx.Data["fileName"] = fileName
 		ctx.Data["WS_URL"] = strings.Replace(rootUrl, "http", "ws", 1) + "/ws/file/" + fileName
@@ -25,11 +27,42 @@ func Init(G *types.Global, m *macaron.Macaron) {
 		ctx.HTML(200, "wsui") // 200 is the response code.
 	})
 
-	files := types.NewFiles()
+	files := s.Files
 
-	m.Get(G.Route("/ws/file/:fileName"), sockets.Messages(), func(ctx *macaron.Context, receiver <-chan string, sender chan<- string, done <-chan bool, disconnect chan<- int, errorChannel <-chan error) {
+	m.Get(s.Route("/ws/file/:fileName"), sockets.Messages(), func(ctx *macaron.Context, receiver <-chan string, sender chan<- string, done <-chan bool, disconnect chan<- int, errorChannel <-chan error) {
 		fileName := ctx.Params(":fileName")
-		client := files.AddClient(fileName, &types.Client{Sender: sender})
+		file := &core.File{}
+		err := s.FileProvider(s, ctx, fileName, file)
+
+		if err != nil {
+			sender <- fmt.Sprintf("4%v", err)
+			sender <- core.CLIENT_CLOSE
+			timer := time.NewTimer(time.Second * 5)
+			select {
+			case <-done:
+				timer.Stop()
+				return
+			case <-timer.C:
+				disconnect <- websocket.CloseNormalClosure
+			}
+			return
+		}
+
+		if !file.Tail {
+			file.Cat(sender)
+			sender <- core.CLIENT_CLOSE
+			timer := time.NewTimer(time.Second * 5)
+			select {
+			case <-done:
+				timer.Stop()
+				return
+			case <-timer.C:
+				disconnect <- websocket.CloseNormalClosure
+			}
+			return
+		}
+
+		client := files.AddClient(fileName, &core.Client{Sender: sender, File:*file})
 
 		for {
 			select {
@@ -52,7 +85,7 @@ func Init(G *types.Global, m *macaron.Macaron) {
 				//
 				// Uh oh, we received an error. This will happen before a close if the client did not disconnect regularly.
 				// Maybe useful if you want to store statistics
-				log.Print(err)
+				log.Error(err)
 				client.Remove()
 			}
 		}

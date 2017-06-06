@@ -1,44 +1,63 @@
 package cli
 
 import (
-	"github.com/moisespsena/logserver/core/types"
+	"github.com/moisespsena/logserver/core"
 	"flag"
 	"strings"
-	"fmt"
 	"log"
 	"net/url"
+	"github.com/op/go-logging"
+	"fmt"
+	"strconv"
 )
 
-func Init(g *types.Global) *types.Global {
-	flag.StringVar(&g.ServerAddr, "server-addr", "0.0.0.0:4000", "The server address. Example: 0.0.0.0:80, unix://file.sock")
-	flag.StringVar(&g.ServerUrl, "server-url", "http://HOST", "The client server url. Example: http://HOST/server")
-	flag.IntVar(&g.SockPerms, "sock-perms", 0666, "The unix sock file perms. Example: 0666")
+func Init(s *core.LogServer) (err error) {
+	flag.StringVar(&s.ServerAddr, "serverAddr", "0.0.0.0:4000",
+		"The server address. Example: 0.0.0.0:80, unix://file.sock")
+	flag.StringVar(&s.ServerUrl, "serverUrl", "http://HOST",
+		"The client server url. Example: http://HOST/server")
+
+	var sockPerms string
+	var logLevel int
+
+	flag.StringVar(&sockPerms, "sockPerms", "0666",
+		"The unix sock file perms. Example: 0666")
+	flag.IntVar(&logLevel, "logLevel", int(logging.INFO),
+		"0=CRITICAL, 1=ERROR, 2=WARNING, 3=NOTICE, 4=INFO, 5=DEBUG")
 
 	flag.Parse()
 
+	i64, err := strconv.ParseInt(sockPerms, 8, 0)
 
-	if strings.HasPrefix(g.ServerAddr, "unix://") {
-		g.UnixSocket = true
-		g.ServerAddr = strings.TrimLeft( g.ServerAddr,"unix://")
+	if err != nil {
+		panic(err)
 	}
 
-	fmt.Println("serverAddr:", g.ServerAddr)
-	fmt.Println("serverUrl:", g.ServerUrl)
-	fmt.Println("sockPerms:", g.SockPerms)
+	s.SockPerms = int(i64)
 
-	if g.UnixSocket {
-		fmt.Println("useUnixSocket? true")
-	} else {
-		fmt.Println("useUnixSocket? false")
+	s.LogLevel = logging.Level(logLevel)
+
+
+	if strings.HasPrefix(s.ServerAddr, "unix://") {
+		s.UnixSocket = true
+		s.ServerAddr = strings.TrimLeft( s.ServerAddr,"unix://")
 	}
 
-	u, err := url.Parse(g.ServerUrl)
+	fmt.Println("-------------------------------------------")
+	fmt.Println("serverAddr:    ", s.ServerAddr)
+	fmt.Println("serverUrl:     ", s.ServerUrl)
+	fmt.Println("sockPerms:     ", sockPerms)
+	fmt.Println("logLevel:      ", s.LogLevel)
+	fmt.Println("useUnixSocket? ", s.UnixSocket)
+	fmt.Println("-------------------------------------------")
+
+	u, err := url.Parse(s.ServerUrl)
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	g.Path = u.Path
+	s.Path = u.Path
 
-	return g
+	return nil
 }
