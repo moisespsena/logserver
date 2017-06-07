@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"path"
 	"github.com/moisespsena/logserver/core/util"
+	"reflect"
+	"github.com/pkg/errors"
 )
 
 const LOG_NAME = "[LogServer] "
@@ -38,28 +40,35 @@ func InitLog(level logging.Level) *logging.Logger {
 	return Log
 }
 
+type Sender struct {
+	Chan chan<- string
+}
 
 type File struct {
-	Name string
-	Info string
-	Tail bool
-	OutPath string
-	ErrPath string
+	Key                  string
+	Info                 string
+	follow               bool
+	OutPath              string
+	ErrPath              string
+	Written              *util.IsWritenResult
+	FollowRequireWritten bool
 }
 
 type LogServer struct {
-	ServerAddr    string
-	ServerUrl     string
-	SockPerms     int
-	UnixSocket    bool
-	Path          string
-	LogLevel      logging.Level
-	M             *macaron.Macaron
-	PrepareServer func(srv *LogServer) (err error)
-	FileProvider  func(srv *LogServer, ctx *macaron.Context, filename string, file *File) error
-	Files         *Files
-	Log           *logging.Logger
-	Data          map[string]interface{}
+	ServerAddr          string
+	ServerUrl           string
+	SockPerms           int
+	UnixSocket          bool
+	Path                string
+	LogLevel            logging.Level
+	M                   *macaron.Macaron
+	PrepareServer       func(srv *LogServer) (err error)
+	FileProvider        func(srv *LogServer, filename string, file *File) (err error)
+	RequestFileProvider func(files *Files, ctx *macaron.Context, filename string) (*File, error)
+	Files               *Files
+	Log                 *logging.Logger
+	Data                map[string]interface{}
+	RootPath            string
 }
 
 type Message struct {
@@ -70,57 +79,63 @@ type Message struct {
 }
 
 type Files struct {
-	Files map[string]*FileChan
-	Timer chan bool
+	Server *LogServer
+	Files  map[string]*FileFollowChan
+	Timer  chan bool
 }
 
-type FileChan struct {
-	Files      *Files
-	FileName   string
-	LastId     int
-	Chan       chan string
-	CatClients    map[int]*Client
-	TailClients    map[int]*Client
-	LastTailId int
-	Tail       *Tail
+type FileFollowChan struct {
+	Files          *Files
+	File           *File
+	LastId         int
+	Chan           chan string
+	Clients        map[int]*Client
+	LastTailId     int
+	Follow         *Follow
+	ClientsMonitor []chan bool
 }
 
 type Client struct {
-	Sender       chan<- string
+	Sender       *Sender
 	Id           int
-	Fc           *FileChan
+	Fc           *FileFollowChan
 	Closed       bool
 	TimeOut      <-chan time.Time
 	CloseTimeOut <-chan time.Time
-	File File
+	exists       bool
 }
 
-type Tail struct {
-	Fc      *FileChan
-	Id      int
-	OutFile string
-	ErrFile string
-	Running int
+type Follow struct {
+	Fc        *FileFollowChan
+	Id        int
+	Running   int
+	KillChans []chan bool
 }
 
-func DefaultFileProvider(srv *LogServer, ctx *macaron.Context, filename string, file *File) error {
-	fpath := path.Join(filename)
+func DefaultRequestFileProvider(files *Files, ctx *macaron.Context, filename string) (*File, error) {
+	return files.GetFile(filename)
+}
 
-	var err error
-	var err2 error
-	var err3 error
+func DefaultFileProvider(srv *LogServer, filename string, file *File) (err error) {
+	fpath := path.Join(srv.RootPath, filename)
 
-	var files []string
+	var (
+		files []string
+	)
 
 	if _, err = os.Stat(fpath); err != nil {
 		if os.IsNotExist(err) {
-			if _, err2 := os.Stat(fpath + ".out"); err2 == nil {
+			_, err2 := os.Stat(fpath + ".out")
+			_, err3 := os.Stat(fpath + ".err")
+
+			if err2 == nil {
 				file.OutPath = fpath + ".out"
-				files = append(files, fpath + ".out")
+				files = append(files, fpath+".out")
 			}
-			if _, err3 := os.Stat(fpath + ".err"); err3 == nil {
+
+			if err3 == nil {
 				file.ErrPath = fpath + ".err"
-				files = append(files, fpath + ".err")
+				files = append(files, fpath+".err")
 			}
 
 			if err2 != nil && err3 != nil {
@@ -134,21 +149,8 @@ func DefaultFileProvider(srv *LogServer, ctx *macaron.Context, filename string, 
 		file.OutPath = fpath
 	}
 
-	for _, fpath = range []string{file.OutPath, file.ErrPath} {
-		if fpath == "" {
-			continue
-		}
-
-		isw, err := util.IsWritten(fpath)
-
-		if err != nil {
-			return err
-		}
-
-		if isw.Is {
-			file.Tail = true
-			break
-		}
+	if _, err = file.CheckFollow(); err != nil {
+		return err
 	}
 
 	return nil
@@ -156,13 +158,20 @@ func DefaultFileProvider(srv *LogServer, ctx *macaron.Context, filename string, 
 
 func NewServer() (s *LogServer) {
 	s = &LogServer{
-		Files:        NewFiles(),
-		Log:          Log,
-		Data:         make(map[string]interface{}),
-		FileProvider: DefaultFileProvider,
+		Log:                 Log,
+		Data:                make(map[string]interface{}),
+		FileProvider:        DefaultFileProvider,
+		RequestFileProvider: DefaultRequestFileProvider,
 	}
 
+	s.NewFiles()
+
 	return s
+}
+
+func (s *LogServer) NewFiles() *Files {
+	s.Files = &Files{s, make(map[string]*FileFollowChan), make(chan bool)}
+	return s.Files
 }
 
 func (g *LogServer) Route(path string) string {
@@ -172,51 +181,104 @@ func (g *LogServer) Route(path string) string {
 	return path
 }
 
-func (fc *FileChan) SendOut(line *string) {
-	for _, client := range fc.TailClients {
-		client.SendOut(line)
+func (fc *FileFollowChan) Send(t int, line interface{}) {
+	for _, client := range fc.Clients {
+		client.Send(t, line)
 	}
 }
 
-func (fc *FileChan) SendErr(line *string) {
-	for _, client := range fc.TailClients {
-		client.SendErr(line)
+func (fc *FileFollowChan) IsWritten() bool {
+	if fc.File.OutPath != "" {
+		if r, err := util.IsWritten(fc.File.OutPath); err == nil && r.Is {
+			return true
+		}
+	}
+	if fc.File.ErrPath != "" {
+		if r, err := util.IsWritten(fc.File.ErrPath); err == nil && r.Is {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (fc *FileFollowChan) ClientMonitor() chan bool {
+	c := make(chan bool)
+	fc.ClientsMonitor = append(fc.ClientsMonitor, c)
+	return c
+}
+
+func (fc *FileFollowChan) Start() {
+	fc.Follow.Start()
+
+	go func() {
+		if fc.File.FollowRequireWritten {
+			for ; len(fc.Clients) > 0 && fc.IsWritten(); {
+				time.Sleep(2 * time.Second)
+			}
+
+			if !fc.IsWritten() {
+				fc.Send(FILE_INFO, "file closed")
+			}
+		} else {
+			for ; len(fc.Clients) > 0; {
+				time.Sleep(2 * time.Second)
+			}
+		}
+
+		fc.Follow.Kill()
+
+		for _, c := range fc.ClientsMonitor {
+			c <- true
+		}
+	}()
+}
+
+func (f *Follow) KillMonitor() chan bool {
+	c := make(chan bool)
+	f.KillChans = append(f.KillChans, c)
+	return c
+}
+
+func (f *Follow) Start() {
+	if f.Fc.File.OutPath != "" {
+		go f.StartFile(f.Fc.File.OutPath, OUT, GLOBAL_ERR, f.KillMonitor())
+	}
+
+	if f.Fc.File.ErrPath != "" {
+		go f.StartFile(f.Fc.File.ErrPath, ERR, GLOBAL_ERR, f.KillMonitor())
 	}
 }
-func (fc *FileChan) SendGlobalErr(line *string) {
-	for _, client := range fc.TailClients {
-		client.SendGlobalErr(line)
+
+func (f *Follow) Kill() {
+	for _, c := range f.KillChans {
+		c <- true
 	}
 }
 
-func (tail *Tail) Start() {
-	go tail.StartFile(tail.OutFile, tail.Fc.SendOut, tail.Fc.SendErr)
-	go tail.StartFile(tail.ErrFile, tail.Fc.SendErr, tail.Fc.SendErr)
+func (f *Follow) IsRunning() bool {
+	return f.Running > 0
 }
 
-func (tail *Tail) IsRunning() bool {
-	return tail.Running > 0
-}
-
-func (tail *Tail) StartFile(fileName string, send func(data *string), sendErr func(data *string)) {
-	tail.Running++
+func (f *Follow) StartFile(fileName string, t int, gt int, kill chan bool) {
+	f.Running++
 
 	defer func() {
-		tail.Running--
+		f.Running--
 	}()
 
-	fc := tail.Fc
+	fc := f.Fc
 	fc.LastTailId++
 
 	if _, err := os.Stat(fileName); err != nil {
 		if os.IsNotExist(err) {
 			line := fmt.Sprintf("File '%v' does not exists.", fileName)
-			fc.SendGlobalErr(&line)
+			fc.Send(gt, &line)
 			return
 		}
 	}
 
-	cmd := exec.Command("tail", "-f", "-n", "1", fileName)
+	cmd := exec.Command("tail", "-f", "-n", "0", fileName)
 	stderr, err := cmd.StderrPipe()
 
 	if err != nil {
@@ -237,12 +299,12 @@ func (tail *Tail) StartFile(fileName string, send func(data *string), sendErr fu
 			if err != nil {
 				if err != io.EOF {
 					line := fmt.Sprint(err)
-					fc.SendGlobalErr(&line)
+					fc.Send(gt, &line)
 				}
 				return
 			}
 			if line != "" {
-				send(&line)
+				fc.Send(t, &line)
 			}
 		}
 
@@ -255,111 +317,156 @@ func (tail *Tail) StartFile(fileName string, send func(data *string), sendErr fu
 			if err != nil {
 				if err != io.EOF {
 					line = fmt.Sprint(err)
-					fc.SendGlobalErr(&line)
+					fc.Send(gt, &line)
 				}
 				return
 			}
 			if line != "" {
-				sendErr(&line)
+				fc.Send(t, &line)
 			}
 		}
 	}()
 
 	if err != nil {
 		line := fmt.Sprint(err)
-		fc.SendGlobalErr(&line)
+		fc.Send(gt, &line)
 	} else {
 		err := cmd.Start()
 
 		if err != nil {
 			line := fmt.Sprint(err)
-			fc.SendGlobalErr(&line)
+			fc.Send(gt, &line)
 			return
 		}
 
-		defer cmd.Process.Kill()
+		done := make(chan error)
+
+		go func() {
+			done <- cmd.Wait()
+		}()
 
 		for {
-			if len(fc.TailClients) == 0 {
-				break
+			select {
+			case err = <-done:
+				return
+			case <-kill:
+				cmd.Process.Kill()
 			}
-			time.Sleep(time.Second * 2)
 		}
-
 	}
 }
 
-func (f *Files) AddClient(fileName string, client *Client) *Client {
-	fc, ok := f.Files[fileName]
+func (f *Files) AddClient(file *File, client *Client) *Client {
+	if !file.follow {
+		panic(errors.New("file isn't follow."))
+	}
+
+	fc, ok := f.Files[file.Key]
 
 	if ok {
 		fc.LastId++
 	} else {
-		fc = &FileChan{
+		fc = &FileFollowChan{
 			f,
-			fileName,
+			file,
 			0,
 			make(chan string, 200),
 			make(map[int]*Client),
-			make(map[int]*Client),
+			0,
+			nil,
+			nil,
+		}
+		fc.Follow = &Follow{
+			fc,
+			fc.LastTailId,
 			0,
 			nil,
 		}
-		fc.Tail = &Tail{
-			fc,
-			fc.LastTailId,
-			client.File.OutPath,
-			client.File.ErrPath,
-			0,
-		}
 		fc.LastTailId++
-		f.Files[fileName] = fc
+		f.Files[file.Key] = fc
 	}
 
 	client.Id = fc.LastId
 	client.Fc = fc
 	client.RenewTimeout()
+	fc.Clients[client.Id] = client
+	client.exists = true
 
-	if client.File.Tail {
-		fc.TailClients[client.Id] = client
-		if len(fc.TailClients) == 1 {
-			fc.Tail.Start()
-		}
+	if len(fc.Clients) == 1 {
+		fc.Start()
 	}
 
 	return client
 }
 
+func (client *Client) Exists() bool {
+	return client.exists
+}
+
 func (client *Client) Remove() {
-	if _, ok := client.Fc.TailClients[client.Id]; ok {
-		delete(client.Fc.TailClients, client.Id)
-	} else {
-		delete(client.Fc.CatClients, client.Id)
+	if !client.exists {
+		panic(errors.New("client does not exists."))
 	}
 
-	if len(client.Fc.TailClients) < 1 && len(client.Fc.CatClients) < 1{
+	delete(client.Fc.Clients, client.Id)
+	client.exists = false
+
+	if len(client.Fc.Clients) < 1 {
 		close(client.Fc.Chan)
-		delete(client.Fc.Files.Files, client.Fc.FileName)
+		delete(client.Fc.Files.Files, client.Fc.File.Key)
 	}
 }
 
 const (
-	OUT = "0"
-	ERR = "1"
-	GLOBAL_ERR = "2"
-	CLIENT_CLOSE = "3"
+	OUT          = 0
+	ERR          = 1
+	GLOBAL_ERR   = 2
+	CLIENT_CLOSE = 3
+	FLASH        = 4
+	FILE_INFO    = 5
+	FOLLOW       = 6
 )
 
-func (file *File) Cat(sender chan<-string) {
-	reader := func (path string, t string) {
+func (file *File) Follow() bool {
+	return file.follow
+}
+
+func (file *File) CheckFollow() (follow bool, err error) {
+	written := false
+
+	for _, fpath := range []string{file.OutPath, file.ErrPath} {
+		if fpath == "" {
+			continue
+		}
+
+		isw, err := util.IsWritten(fpath)
+
+		if err != nil {
+			return false, err
+		}
+
+		if isw.Is {
+			written = true
+			file.Written = &isw
+			break
+		}
+	}
+
+	file.follow = written || !file.FollowRequireWritten
+
+	return file.follow, nil
+}
+func (file *File) Cat(sender *Sender) {
+	reader := func(path string, t int) {
 		inFile, _ := os.Open(path)
 		defer inFile.Close()
 		scanner := bufio.NewScanner(inFile)
 		scanner.Split(bufio.ScanLines)
+		var line string
 
 		for scanner.Scan() {
-			line := scanner.Text()
-			sender <- t + line
+			line = scanner.Text()
+			sender.Send(t, &line)
 		}
 	}
 
@@ -372,29 +479,12 @@ func (file *File) Cat(sender chan<-string) {
 	}
 }
 
-
 func (client *Client) RenewTimeout() {
 	client.TimeOut = time.After(5 * time.Second)
 }
 
-func (client *Client) Send(t string, line *string) {
-	client.Sender <- t + *line
-}
-
-func (client *Client) SendOut(line *string) {
-	client.Send(OUT, line)
-}
-
-func (client *Client) SendErr(line *string) {
-	client.Send(ERR, line)
-}
-func (client *Client) SendGlobalErr(line *string) {
-	client.Send(GLOBAL_ERR, line)
-}
-
-
-func NewFiles() *Files {
-	return &Files{make(map[string]*FileChan), make(chan bool)}
+func (client *Client) Send(t int, data interface{}) {
+	client.Sender.Send(t, data)
 }
 
 func (files *Files) Start() {
@@ -402,4 +492,24 @@ func (files *Files) Start() {
 		time.Sleep(3 * time.Second)
 		files.Timer <- true
 	}()
+}
+
+func (files *Files) GetFile(key string) (*File, error) {
+	file := &File{FollowRequireWritten: true, Key: key}
+	err := files.Server.FileProvider(files.Server, key, file)
+	return file, err
+}
+
+func (s *Sender) SendClose() {
+	s.Send(CLIENT_CLOSE, "")
+}
+
+func (s *Sender) Send(t int, data interface{}) {
+	rvalue := reflect.ValueOf(data)
+
+	if rvalue.Kind() == reflect.Ptr {
+		data = reflect.Indirect(rvalue)
+	}
+
+	s.Chan <- fmt.Sprintf("%02x%v", t, data)
 }

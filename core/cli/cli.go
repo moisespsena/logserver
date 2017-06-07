@@ -9,6 +9,7 @@ import (
 	"github.com/op/go-logging"
 	"fmt"
 	"strconv"
+	"path/filepath"
 )
 
 func Init(s *core.LogServer) (err error) {
@@ -16,6 +17,10 @@ func Init(s *core.LogServer) (err error) {
 		"The server address. Example: 0.0.0.0:80, unix://file.sock")
 	flag.StringVar(&s.ServerUrl, "serverUrl", "http://HOST",
 		"The client server url. Example: http://HOST/server")
+	flag.StringVar(&s.RootPath, "root", "./root",
+		"Root path of log files")
+
+	s.RootPath = filepath.Clean(s.RootPath)
 
 	var sockPerms string
 	var logLevel int
@@ -37,13 +42,13 @@ func Init(s *core.LogServer) (err error) {
 
 	s.LogLevel = logging.Level(logLevel)
 
-
 	if strings.HasPrefix(s.ServerAddr, "unix://") {
 		s.UnixSocket = true
-		s.ServerAddr = strings.TrimLeft( s.ServerAddr,"unix://")
+		s.ServerAddr = strings.TrimLeft(s.ServerAddr, "unix://")
 	}
 
 	fmt.Println("-------------------------------------------")
+	fmt.Println("root:          ", s.RootPath)
 	fmt.Println("serverAddr:    ", s.ServerAddr)
 	fmt.Println("serverUrl:     ", s.ServerUrl)
 	fmt.Println("sockPerms:     ", sockPerms)

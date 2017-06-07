@@ -14,6 +14,5 @@ func main() {
 	}
 
 	core.InitLog(s.LogLevel)
-
 	web.Run(s)
 }

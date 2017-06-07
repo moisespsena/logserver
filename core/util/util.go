@@ -3,16 +3,17 @@ package util
 import (
 	"os/exec"
 	"io/ioutil"
-	"bytes"
+	"regexp"
+	"bufio"
+	"io"
 	"strings"
 	"strconv"
-	"regexp"
 )
 
 type IsWritenResult struct {
-	Is bool
-	Cmd string
-	Pid int
+	Is   bool
+	Cmd  string
+	Pid  int
 	User string
 }
 
@@ -31,7 +32,39 @@ func IsWritten(path string) (IsWritenResult, error) {
 
 	r := &IsWritenResult{}
 
-	dataBytes, err := ioutil.ReadAll(stdout)
+	reader := bufio.NewReader(stdout)
+
+	first := true
+
+	for {
+		line, err := reader.ReadString('\n')
+
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return rNil, err
+		}
+
+		if first {
+			first = false
+			continue
+		}
+
+		data := lsofRegex.Split(line, 5)
+
+		if strings.ContainsAny(data[3], "uw") {
+			r.Is = true
+			r.Cmd = data[0]
+			r.User = data[2]
+			r.Pid, err = strconv.Atoi(data[1])
+
+			if err != nil {
+				return rNil, err
+			}
+			break
+		}
+	}
 
 	if err != nil {
 		return rNil, err
@@ -45,19 +78,6 @@ func IsWritten(path string) (IsWritenResult, error) {
 		}
 		return rNil, err
 	}
-
-	r.Is = true
-
-	data := lsofRegex.Split(strings.Split(bytes.NewBuffer(dataBytes).String(), "\n")[1], 4)
-
-	r.Cmd = data[0]
-	r.User = data[2]
-	r.Pid, err = strconv.Atoi(data[1])
-
-	if err != nil {
-		return rNil, err
-	}
-
 
 	return *r, nil
 }

@@ -10,18 +10,20 @@ import (
 	"net"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"github.com/go-macaron/pongo2"
 )
 
-func Run(s *core.LogServer) (err error)  {
+func Run(s *core.LogServer) (err error) {
 	defer s.Log.Info("done")
+	s.RootPath = filepath.Clean(s.RootPath)
 	m := macaron.Classic()
 	s.M = m
 	m.Use(macaron.Static("static", macaron.StaticOptions{
 		Prefix:      s.Route("static"),
 		SkipLogging: true,
 	}))
-
-	m.Use(macaron.Renderer())
+	m.Use(pongo2.Pongoer())
 
 	if s.PrepareServer != nil {
 		err := (s.PrepareServer)(s)
