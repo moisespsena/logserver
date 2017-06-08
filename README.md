@@ -18,20 +18,32 @@ go build
 
 Access http://localhost:4000/file/test.log
 
+## Configuration
+
+The sample configurarion file is `conf/sample.ini`.
+
+Or 
+
+```bash
+./logserver -sampleConfig
+```
+
+For customize configurations and show it:
+
+```bash
+./logserver -conf conf/sample.init -printConfig
+```
+
 ## CLI Options
 
 ```bash
 ./logserver -h
 Usage of ./logserver:
-  -logLevel int
-        0=CRITICAL, 1=ERROR, 2=WARNING, 3=NOTICE, 4=INFO, 5=DEBUG (default 4)
-  -root string
-        Root path of log files (default "./root")
-  -serverAddr string
-        The server address. Example: 0.0.0.0:80, unix://file.sock (default "0.0.0.0:4000")
-  -serverUrl string
-        The client server url. Example: http://HOST/server (default "http://HOST")
-  -sockPerms string
-        The unix sock file perms. Example: 0666 (default "0666")
+  -config string
+        The Config File. Example: cfg.init
+  -printConfig
+        Print Default INI Config
+  -sampleConfig
+        Print Sample INI Config
 ```
 
