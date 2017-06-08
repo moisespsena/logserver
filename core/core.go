@@ -14,6 +14,11 @@ import (
 	"github.com/moisespsena/logserver/core/util"
 	"reflect"
 	"github.com/pkg/errors"
+	"gopkg.in/ini.v1"
+	"strconv"
+	"path/filepath"
+	"net/url"
+	"strings"
 )
 
 const LOG_NAME = "[LogServer] "
@@ -69,6 +74,10 @@ type LogServer struct {
 	Log                 *logging.Logger
 	Data                map[string]interface{}
 	RootPath            string
+	ConfigFile          string
+	OtherConfigFiles    []interface{}
+	Config              *ini.File
+	Dev                 bool
 }
 
 type Message struct {
@@ -162,6 +171,11 @@ func NewServer() (s *LogServer) {
 		Data:                make(map[string]interface{}),
 		FileProvider:        DefaultFileProvider,
 		RequestFileProvider: DefaultRequestFileProvider,
+		ServerAddr:          "0.0.0.0:4000",
+		ServerUrl:           "http://HOST",
+		RootPath:            "./root",
+		SockPerms:           0666,
+		LogLevel:            logging.INFO,
 	}
 
 	s.NewFiles()
@@ -172,6 +186,159 @@ func NewServer() (s *LogServer) {
 func (s *LogServer) NewFiles() *Files {
 	s.Files = &Files{s, make(map[string]*FileFollowChan), make(chan bool)}
 	return s.Files
+}
+
+func (s *LogServer) SetServerUrl(serverUrl string) error {
+	u, err := url.Parse(serverUrl)
+
+	if err != nil {
+		return err
+	}
+
+	s.Path = u.Path
+	return nil
+}
+
+func ParseConfigValue(dest interface{}, value interface{},
+	parse func(value string) (interface{}, error)) error {
+	expected := reflect.TypeOf(dest).Kind()
+	vt := reflect.TypeOf(value).Kind()
+
+	if vt != expected {
+		switch vt {
+		case reflect.String:
+			newValue, err := parse(value.(string))
+			if err != nil {
+				return err
+			}
+			dest = newValue
+		default:
+			return fmt.Errorf("unexpected type %T", value)
+		}
+	}
+
+	dest = value
+	return nil
+}
+
+func (s *LogServer) ParseConfig(cfg map[string]interface{}) (err error) {
+	if v, ok := cfg["serverAddr"]; ok {
+		s.ServerAddr = fmt.Sprint(v)
+
+		if strings.HasPrefix(s.ServerAddr, "unix:") {
+			s.UnixSocket = true
+			s.ServerAddr = strings.TrimLeft(s.ServerAddr, "unix:")
+		}
+	}
+	if v, ok := cfg["serverUrl"]; ok {
+		err = s.SetServerUrl(fmt.Sprint(v))
+
+		if err != nil {
+			return err
+		}
+	}
+	if v, ok := cfg["root"]; ok {
+		s.RootPath = filepath.Clean(fmt.Sprint(v))
+	}
+	if v, ok := cfg["sockPerms"]; ok {
+		err = ParseConfigValue(&s.ServerAddr, v, func(value string) (interface{}, error) {
+			i64, err := strconv.ParseInt(value, 8, 0)
+			if err != nil {
+				return nil, err
+			}
+			return int(i64), nil
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+	if v, ok := cfg["logLevel"]; ok {
+		var logLevel int
+		err = ParseConfigValue(&logLevel, v, func(value string) (interface{}, error) {
+			i, err := strconv.ParseInt(value, 10, 0)
+			if err == nil {
+
+				if i >= 0 && i <= 5 {
+					return i, nil
+				}
+				return nil, errors.New("logLevel value isn't between 0 and 5")
+			}
+			return nil, err
+		})
+
+		if err != nil {
+			return err
+		}
+
+		s.LogLevel = logging.Level(logLevel)
+	}
+	if v, ok := cfg["dev"]; ok {
+		ParseConfigValue(&s.Dev, v, func(value string) (interface{}, error) {
+			if value == "true" {
+				return true, err
+			}
+			return false, nil
+		})
+	}
+	return err
+}
+
+func (s *LogServer) PrintConfig() {
+	fmt.Println("-------------------------------------------")
+	fmt.Println("root:          ", s.RootPath)
+	fmt.Println("serverAddr:    ", s.ServerAddr)
+	fmt.Println("serverUrl:     ", s.ServerUrl)
+	fmt.Println("sockPerms:     0%o", s.SockPerms)
+	fmt.Println("logLevel:      ", s.LogLevel)
+	fmt.Println("useUnixSocket? ", s.UnixSocket)
+	fmt.Println("-------------------------------------------")
+}
+
+func SampleConfig() string {
+	return NewServer().ConfigString()
+}
+
+func (s *LogServer) ConfigString() string {
+	return fmt.Sprintf("[logserver]\n"+
+		"root = %v\n"+
+		"serverAddr = %v\n"+
+		"serverUrl = %v%v\n"+
+		"sockPerms = 0%o\n"+
+		"logLevel = %v\n"+
+		"dev = %v\n",
+		s.RootPath,
+		s.ServerAddr,
+		s.ServerUrl,
+		s.Path,
+		s.SockPerms,
+		int(s.LogLevel),
+		s.Dev)
+}
+
+func (s *LogServer) LoadConfigFromStringMap(m map[string]string) (err error) {
+	arg := make(map[string]interface{})
+
+	for k, v := range m {
+		arg[k] = v
+	}
+
+	return s.ParseConfig(arg)
+}
+
+func (s *LogServer) LoadConfig() (err error) {
+	if s.ConfigFile != "" || len(s.OtherConfigFiles) > 0 {
+		s.Config, err = ini.Load(s.ConfigFile, s.OtherConfigFiles...)
+		if err == nil {
+			section, err := s.Config.GetSection("logserver")
+			if err == nil {
+				err = s.LoadConfigFromStringMap(section.KeysHash())
+			}
+		}
+	} else {
+		s.Config = ini.Empty()
+	}
+	return err
 }
 
 func (g *LogServer) Route(path string) string {

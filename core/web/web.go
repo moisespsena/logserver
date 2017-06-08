@@ -18,6 +18,16 @@ func Run(s *core.LogServer) (err error) {
 	defer s.Log.Info("done")
 	s.RootPath = filepath.Clean(s.RootPath)
 	m := macaron.Classic()
+	macaron.SetConfig(s.Config)
+
+	if os.Getenv("MACARON_ENV") == "" {
+		if s.Dev {
+			os.Setenv("MACARON_ENV", macaron.DEV)
+		} else {
+			os.Setenv("MACARON_ENV", macaron.PROD)
+		}
+	}
+
 	s.M = m
 	m.Use(macaron.Static("static", macaron.StaticOptions{
 		Prefix:      s.Route("static"),
