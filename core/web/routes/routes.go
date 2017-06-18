@@ -13,23 +13,40 @@ import (
 	"os"
 )
 
+func DefaultTemplateData(s *core.LogServer, ctx *macaron.Context) (rootUrl string) {
+	rootUrl = strings.Replace(s.ServerUrl, "HOST", ctx.Req.Host, 1) + s.Path
+	ctx.Data["srv"] = s
+	ctx.Data["ROOT_URL"] = rootUrl
+	ctx.Data["STATIC_URL"] = rootUrl + "/static"
+	ctx.Data["DOWNLOAD_URL"] = rootUrl + "/download"
+	ctx.Data["WS_URL"] = strings.Replace(rootUrl, "http", "ws", 1) + "/ws"
+	return rootUrl
+}
+
+
 func Init(s *core.LogServer, m *macaron.Macaron) {
 	log := core.Log
 
-	m.Get(s.Route("/favicon.ico"), func(ctx *macaron.Context) (int, string) {
-		return 404, "Not Found"
-	})
+	if s.HomeHandler == nil {
+		s.HomeHandler = func(ctx *macaron.Context) {
+			DefaultTemplateData(s, ctx)
+			ctx.HTML(200, "home")
+		}
+	}
 
-	m.Get(s.Route("/file/*.*"), func(ctx *macaron.Context) {
+	m.Get(s.Route("/"), s.HomeHandler)
+
+	m.Get(s.Route("/ui/*.*"), func(ctx *macaron.Context) {
 		ext := ctx.Params(":ext")
 		key := ctx.Params(":path")
+		key = strings.Replace(key,"../", "", -1)
+		key = strings.Replace(key,"/./", "/", -1)
 
 		if ext != "" {
 			key += "." + ext
 		}
 
 		file, err := s.RequestFileProvider(s.Files, ctx, key)
-		rootUrl := strings.Replace(s.ServerUrl, "HOST", ctx.Req.Host, 1)
 
 		status := 200
 
@@ -42,16 +59,16 @@ func Init(s *core.LogServer, m *macaron.Macaron) {
 			}
 		}
 
+		DefaultTemplateData(s, ctx)
+
 		ctx.Data["file"] = file
-		ctx.Data["ROOT_URL"] = rootUrl
-		ctx.Data["WS_URL"] = strings.Replace(rootUrl, "http", "ws", 1) + "/ws/file/" + key
-		ctx.Data["STATIC_URL"] = rootUrl + "/static"
-		ctx.HTML(status, "wsui") // 200 is the response code.
+		ctx.Data["WS_URL"] = ctx.Data["WS_URL"].(string) + "/" + key
+		ctx.HTML(status, "wsui")
 	})
 
 	files := s.Files
 
-	m.Get(s.Route("/ws/file/*.*"), sockets.Messages(), func(ctx *macaron.Context, receiver <-chan string, senderChan chan<- string, done <-chan bool, disconnect chan<- int, errorChannel <-chan error) {
+	m.Get(s.Route("/ws/*.*"), sockets.Messages(), func(ctx *macaron.Context, receiver <-chan string, senderChan chan<- string, done <-chan bool, disconnect chan<- int, errorChannel <-chan error) {
 		ext := ctx.Params(":ext")
 		key := ctx.Params(":path")
 

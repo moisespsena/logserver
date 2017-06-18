@@ -55,11 +55,15 @@ type File struct {
 	follow               bool
 	OutPath              string
 	ErrPath              string
+	OutKey               string
+	ErrKey               string
 	Written              *util.IsWritenResult
 	FollowRequireWritten bool
 }
 
 type LogServer struct {
+	SiteName            string
+	SiteTitle           string
 	ServerAddr          string
 	ServerUrl           string
 	SockPerms           int
@@ -70,6 +74,7 @@ type LogServer struct {
 	PrepareServer       func(srv *LogServer) (err error)
 	FileProvider        func(srv *LogServer, filename string, file *File) (err error)
 	RequestFileProvider func(files *Files, ctx *macaron.Context, filename string) (*File, error)
+	HomeHandler         interface{}
 	Files               *Files
 	Log                 *logging.Logger
 	Data                map[string]interface{}
@@ -139,11 +144,13 @@ func DefaultFileProvider(srv *LogServer, filename string, file *File) (err error
 
 			if err2 == nil {
 				file.OutPath = fpath + ".out"
+				file.OutKey = filename + ".out"
 				files = append(files, fpath+".out")
 			}
 
 			if err3 == nil {
 				file.ErrPath = fpath + ".err"
+				file.ErrKey = filename + ".err"
 				files = append(files, fpath+".err")
 			}
 
@@ -156,6 +163,7 @@ func DefaultFileProvider(srv *LogServer, filename string, file *File) (err error
 	} else {
 		files = append(files, fpath)
 		file.OutPath = fpath
+		file.OutKey = filename
 	}
 
 	if _, err = file.CheckFollow(); err != nil {
@@ -173,7 +181,9 @@ func NewServer() (s *LogServer) {
 		RequestFileProvider: DefaultRequestFileProvider,
 		ServerAddr:          "0.0.0.0:4000",
 		ServerUrl:           "http://HOST",
-		RootPath:            "./root",
+		RootPath:            "./data",
+		SiteName:            "Log Server",
+		SiteTitle:           "Log Server",
 		SockPerms:           0666,
 		LogLevel:            logging.INFO,
 	}
@@ -200,7 +210,7 @@ func (s *LogServer) SetServerUrl(serverUrl string) error {
 }
 
 func ParseConfigValue(dest interface{}, value interface{},
-	parse func(value string) (interface{}, error)) error {
+	parse func(value string) (interface{}, error)) (interface{}, error) {
 	expected := reflect.TypeOf(dest).Kind()
 	vt := reflect.TypeOf(value).Kind()
 
@@ -209,19 +219,26 @@ func ParseConfigValue(dest interface{}, value interface{},
 		case reflect.String:
 			newValue, err := parse(value.(string))
 			if err != nil {
-				return err
+				return nil, err
 			}
 			dest = newValue
+			return newValue, nil
 		default:
-			return fmt.Errorf("unexpected type %T", value)
+			return nil, fmt.Errorf("unexpected type %T", value)
 		}
 	}
 
 	dest = value
-	return nil
+	return value, nil
 }
 
 func (s *LogServer) ParseConfig(cfg map[string]interface{}) (err error) {
+	if v, ok := cfg["siteName"]; ok {
+		s.SiteName = v.(string)
+	}
+	if v, ok := cfg["siteTitle"]; ok {
+		s.SiteTitle = v.(string)
+	}
 	if v, ok := cfg["serverAddr"]; ok {
 		s.ServerAddr = fmt.Sprint(v)
 
@@ -231,17 +248,17 @@ func (s *LogServer) ParseConfig(cfg map[string]interface{}) (err error) {
 		}
 	}
 	if v, ok := cfg["serverUrl"]; ok {
-		err = s.SetServerUrl(fmt.Sprint(v))
+		err = s.SetServerUrl(v.(string))
 
 		if err != nil {
 			return err
 		}
 	}
 	if v, ok := cfg["root"]; ok {
-		s.RootPath = filepath.Clean(fmt.Sprint(v))
+		s.RootPath = filepath.Clean(v.(string))
 	}
 	if v, ok := cfg["sockPerms"]; ok {
-		err = ParseConfigValue(&s.ServerAddr, v, func(value string) (interface{}, error) {
+		_, err = ParseConfigValue(&s.ServerAddr, v, func(value string) (interface{}, error) {
 			i64, err := strconv.ParseInt(value, 8, 0)
 			if err != nil {
 				return nil, err
@@ -254,11 +271,12 @@ func (s *LogServer) ParseConfig(cfg map[string]interface{}) (err error) {
 		}
 	}
 	if v, ok := cfg["logLevel"]; ok {
-		var logLevel int
-		err = ParseConfigValue(&logLevel, v, func(value string) (interface{}, error) {
+		var logLevel int64
+		var x interface{}
+
+		x, err = ParseConfigValue(&logLevel, v, func(value string) (interface{}, error) {
 			i, err := strconv.ParseInt(value, 10, 0)
 			if err == nil {
-
 				if i >= 0 && i <= 5 {
 					return i, nil
 				}
@@ -271,8 +289,9 @@ func (s *LogServer) ParseConfig(cfg map[string]interface{}) (err error) {
 			return err
 		}
 
-		s.LogLevel = logging.Level(logLevel)
+		s.LogLevel = logging.Level(x.(int64))
 	}
+
 	if v, ok := cfg["dev"]; ok {
 		ParseConfigValue(&s.Dev, v, func(value string) (interface{}, error) {
 			if value == "true" {
@@ -281,17 +300,23 @@ func (s *LogServer) ParseConfig(cfg map[string]interface{}) (err error) {
 			return false, nil
 		})
 	}
+
 	return err
 }
 
 func (s *LogServer) PrintConfig() {
 	fmt.Println("-------------------------------------------")
-	fmt.Println("root:          ", s.RootPath)
+	fmt.Println("siteName:      ", s.SiteName)
+	fmt.Println("siteTitle:     ", s.SiteTitle)
 	fmt.Println("serverAddr:    ", s.ServerAddr)
+	fmt.Println("root:          ", s.RootPath)
 	fmt.Println("serverUrl:     ", s.ServerUrl)
-	fmt.Println("sockPerms:     0%o", s.SockPerms)
+	fmt.Println("serverPath:    ", s.Path)
 	fmt.Println("logLevel:      ", s.LogLevel)
 	fmt.Println("useUnixSocket? ", s.UnixSocket)
+	if s.UnixSocket {
+		fmt.Printf("sockPerms:      0%o\n", s.SockPerms)
+	}
 	fmt.Println("-------------------------------------------")
 }
 
@@ -300,17 +325,25 @@ func SampleConfig() string {
 }
 
 func (s *LogServer) ConfigString() string {
+	serverUrl := s.ServerUrl
+
+	if s.Path != "" {
+		serverUrl += s.Path
+	}
 	return fmt.Sprintf("[logserver]\n"+
-		"root = %v\n"+
+		"siteName = %v\n"+
+		"siteTitle = %v\n"+
 		"serverAddr = %v\n"+
-		"serverUrl = %v%v\n"+
+		"serverUrl = %v\n"+
+		"root = %v\n"+
 		"sockPerms = 0%o\n"+
 		"logLevel = %v\n"+
 		"dev = %v\n",
-		s.RootPath,
+		s.SiteName,
+		s.SiteTitle,
 		s.ServerAddr,
-		s.ServerUrl,
-		s.Path,
+		serverUrl,
+		s.RootPath,
 		s.SockPerms,
 		int(s.LogLevel),
 		s.Dev)

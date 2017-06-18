@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"github.com/go-macaron/pongo2"
+	"syscall"
 )
 
 func Run(s *core.LogServer) (err error) {
@@ -33,6 +34,10 @@ func Run(s *core.LogServer) (err error) {
 		Prefix:      s.Route("static"),
 		SkipLogging: true,
 	}))
+	m.Use(macaron.Static(s.RootPath, macaron.StaticOptions{
+		Prefix:      s.Route("download"),
+		SkipLogging: true,
+	}))
 	m.Use(pongo2.Pongoer())
 
 	if s.PrepareServer != nil {
@@ -47,6 +52,7 @@ func Run(s *core.LogServer) (err error) {
 	stateChan := make(chan error)
 	signalChan := make(chan os.Signal, 1)
 	signal.Notify(signalChan, os.Interrupt)
+	signal.Notify(signalChan, syscall.SIGTERM)
 
 	var DONE = errors.New("DONE")
 
@@ -54,6 +60,16 @@ func Run(s *core.LogServer) (err error) {
 		var err error
 
 		if s.UnixSocket {
+			rmSock := func() {
+				_, err := os.Stat(s.ServerAddr)
+				if err == nil {
+					os.Remove(s.ServerAddr)
+				}
+			}
+
+			rmSock()
+			defer rmSock()
+
 			listener, err := net.ListenUnix("unix", &net.UnixAddr{s.ServerAddr, "unix"})
 
 			if err != nil {
@@ -81,15 +97,16 @@ func Run(s *core.LogServer) (err error) {
 		stateChan <- DONE
 	}()
 
-	s.Log.Info("Running...")
+	s.PrintConfig()
+	s.Log.Infof("listening on %v ...", s.ServerAddr)
 
 	select {
 	case err := <-stateChan:
 		if err != DONE {
-			s.Log.Error(err)
+			s.Log.Critical(err)
 		}
 	case sig := <-signalChan:
-		s.Log.Warning("Signal: ", sig)
+		s.Log.Infof("Signal Receive: ", sig)
 	}
 
 	return nil

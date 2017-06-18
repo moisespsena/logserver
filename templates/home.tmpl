@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ srv.SiteTitle }}</title>
+
+    <!-- Bootstrap -->
+    <link href="{{ STATIC_URL }}/bootstrap/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="{{ STATIC_URL }}/app/css/app.css" rel="stylesheet" />
+
+    <!-- HTML5 shim and Respond.js for IE8 support of HTML5 elements and media queries -->
+    <!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
+    <!--[if lt IE 9]>
+      <script src="https://oss.maxcdn.com/html5shiv/3.7.3/html5shiv.min.js"></script>
+      <script src="https://oss.maxcdn.com/respond/1.4.2/respond.min.js"></script>
+    <![endif]-->
+</head>
+<body>
+    <nav class="navbar navbar-default navbar-fixed-top navbar-inverse" >
+      <div class="container-fluid">
+        <div class="navbar-header">
+          <a href="#" class="navbar-brand">{{ srv.SiteName }}</a>
+            <span class="navbar-brand"><small><i>by <a href="https://github.com/moisespsena/logserver">Go LogServer</a></i></small></span>
+          <a href="#" id="fileInfo" style="display:none" class="navbar-brand"
+            data-toggle="modal" data-target="#fileInfoModal">
+              <span class="glyphicon glyphicon-info-sign text-info" aria-hidden="true"></span>
+          </a>
+        </div>
+      </div>
+    </nav>
+
+    <div class="container-fluid" style="margin-top: 110px">
+        <p>Hello on the {{ srv.SiteName }}!</p>
+        <p>Powered by <a href="https://github.com/moisespsena/logserver">Go LogServer</a>.</p>
+    </div>
+
+    <script type="text/javascript" src="{{ STATIC_URL }}/jquery.min.js"></script>
+    <script src="{{ STATIC_URL }}/bootstrap/js/bootstrap.min.js"></script>
+</body>
+</html>

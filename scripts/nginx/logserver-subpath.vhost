@@ -1,0 +1,43 @@
+#################################################
+#
+# CONFIGURATION
+# -------------
+# See at "serverUrl" config key
+# logserver -config conf/sample-subpath-unix-addr.ini
+#
+#################################################
+
+upstream logserver-http-backend {
+    # see at "serverAddr" config key
+    server unix:///home/moi/go-work/src/github.com/moisespsena/logserver/listen.sock;
+    keepalive 60;
+}
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+server {
+    listen 85;
+    server_name _;
+    access_log /var/log/logserver-nginx.access.log;
+    error_log /var/log/logserver-nginx.err.log crit;
+
+    location /sub/path/ws/ {
+        proxy_set_header Upgrade         $http_upgrade;
+        proxy_set_header Connection      "upgrade";
+        proxy_set_header Host            $host:$server_port;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_http_version               1.1;
+        proxy_pass                       http://logserver-http-backend;
+    }
+
+    location /sub/path {
+        proxy_set_header Host            $host:$server_port;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_http_version               1.1;
+        proxy_set_header Connection      "";
+        proxy_pass                       http://logserver-http-backend;
+    }
+}

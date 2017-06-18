@@ -1,14 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Log Server</title>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ srv.SiteTitle }}</title>
 
     <!-- Bootstrap -->
-    <link href="{{ STATIC_URL }}/bootstrap/css/bootstrap.min.css" rel="stylesheet">
-    <link href="{{ STATIC_URL }}/app/css/app.css" rel="stylesheet">
+    <link href="{{ STATIC_URL }}/bootstrap/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="{{ STATIC_URL }}/app/css/app.css" rel="stylesheet" />
 
     <!-- HTML5 shim and Respond.js for IE8 support of HTML5 elements and media queries -->
     <!-- WARNING: Respond.js doesn't work if you view the page via file:// -->
@@ -21,7 +21,8 @@
     <nav class="navbar navbar-default navbar-fixed-top navbar-inverse" >
       <div class="container-fluid">
         <div class="navbar-header">
-          <a href="#" class="navbar-brand">Monitorando '{{ file.Key }}'</a>
+          <a href="#" class="navbar-brand">{{ srv.SiteName }}</a>
+            <span class="navbar-brand"><small><i>by <a href="https://github.com/moisespsena/logserver">Go LogServer</a></i></small></span>
           <a href="#" id="fileInfo" style="display:none" class="navbar-brand"
             data-toggle="modal" data-target="#fileInfoModal">
               <span class="glyphicon glyphicon-info-sign text-info" aria-hidden="true"></span>
@@ -45,19 +46,27 @@
                   <div class="collapse navbar-collapse" id="navbar-collapse-1">
                     <ul id="filter" class="nav navbar-nav">
                       <li role="presentation" class="active" data-filter="*"><a href="#">Tudo</a></li>
-                      <li role="presentation" data-filter="i"><a href="#"><span class="glyphicon glyphicon-ok text-info" aria-hidden="true"></span> Nomal</a></li>
+                      <li role="presentation" data-filter="i"><a href="#"><span class="glyphicon glyphicon-ok text-info" aria-hidden="true"></span> Normal</a></li>
                       <li role="presentation" data-filter="e"><a href="#"><span class="glyphicon glyphicon-exclamation-sign text-danger" aria-hidden="true"></span> Erro</a></li>
                     </ul>
                     <ul class="nav navbar-nav">
                         <li role="presentation"><a href="#" id="logClean"><span class="glyphicon glyphicon-erase text-danger" aria-hidden="true"></span> Limpar</a></li>
+                        <li>
+                            <a href="{{ DOWNLOAD_URL }}/{{ file.OutKey }}"><span class="glyphicon glyphicon-download text-info" aria-hidden="true"></span> Baixar Normal</a>
+                        </li>
+                        {% if file.ErrKey != "" %}
+                        <li>
+                            <a href="{{ DOWNLOAD_URL }}/{{ file.ErrKey }}"><span class="glyphicon glyphicon-download text-danger" aria-hidden="true"></span> Baixar Erros</a>
+                        </li>
+                        {% endif %}
                     </ul>
 
                     <ul class="nav navbar-nav navbar-right">
                       <li id="follow" style="display:none"><span class="navbar-brand text-info">(<span class="glyphicon glyphicon-cloud-download" aria-hidden="true"></span> seguindo... )</span></li>
                       <li><span class="navbar-brand">Monitoramento: </span></li>
                       <li>
-                         <button id="start" href="#" class="btn btn-success navbar-btn"><span class="glyphicon glyphicon-play" aria-hidden="true"></span> Iniciar</button>
-                         <button id="stop" href="#" class="btn btn-danger navbar-btn"><span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Parar</button>
+                         <button id="start" class="btn btn-success navbar-btn"><span class="glyphicon glyphicon-play" aria-hidden="true"></span> Iniciar</button>
+                         <button id="stop" class="btn btn-danger navbar-btn"><span class="glyphicon glyphicon-stop" aria-hidden="true"></span> Parar</button>
                       </li>
                       <li>&nbsp;</li>
 
