@@ -131,13 +131,19 @@ func DefaultRequestFileProvider(files *Files, ctx *macaron.Context, filename str
 }
 
 func DefaultFileProvider(srv *LogServer, filename string, file *File) (err error) {
-	fpath := path.Join(srv.RootPath, filename)
+	fpath, err := filepath.Abs(path.Join(srv.RootPath, filename))
+
+	if err != nil {
+		return err
+	}
 
 	var (
 		files []string
 	)
 
-	if _, err = os.Stat(fpath); err != nil {
+	stat, err := os.Stat(fpath)
+
+	if err != nil {
 		if os.IsNotExist(err) {
 			_, err2 := os.Stat(fpath + ".out")
 			_, err3 := os.Stat(fpath + ".err")
@@ -145,13 +151,13 @@ func DefaultFileProvider(srv *LogServer, filename string, file *File) (err error
 			if err2 == nil {
 				file.OutPath = fpath + ".out"
 				file.OutKey = filename + ".out"
-				files = append(files, fpath+".out")
+				files = append(files, file.OutPath)
 			}
 
 			if err3 == nil {
 				file.ErrPath = fpath + ".err"
 				file.ErrKey = filename + ".err"
-				files = append(files, fpath+".err")
+				files = append(files, file.ErrPath)
 			}
 
 			if err2 != nil && err3 != nil {
@@ -160,13 +166,15 @@ func DefaultFileProvider(srv *LogServer, filename string, file *File) (err error
 		} else {
 			return err
 		}
+	} else if stat.Mode().IsDir() {
+		return errors.New("'" + filename + "' is a directory.")
 	} else {
-		files = append(files, fpath)
 		file.OutPath = fpath
 		file.OutKey = filename
 	}
 
-	if _, err = file.CheckFollow(); err != nil {
+	files = append(files, fpath)
+		if _, err = file.CheckFollow(); err != nil {
 		return err
 	}
 
