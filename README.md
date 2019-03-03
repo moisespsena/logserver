@@ -49,11 +49,12 @@ Usage of ./logserver:
 
 # Nginx Proxy Pass Example
 
-Your `serverUrl` config:
+Your `serverUrl` config example:
 
 ```ini
 ...
-serverUrl = PROTO://HOST/sub/path
+serverUrl  = PROTO://HOST/sub/path
+serverAddr = 127.0.0.1:4000
 ...
 ```
 
@@ -69,6 +70,7 @@ Nginx conf:
         proxy_set_header Origin          $scheme://$host:$server_port;
         proxy_http_version               1.1;
         proxy_pass                       http://localhost:4000;
+        # proxy_pass                       http://unix:/var/run/logger.sock;
     }
 
     location /sub/path {
@@ -78,5 +80,6 @@ Nginx conf:
         proxy_set_header Origin          $scheme://$host:$server_port;
         proxy_http_version               1.1;
         proxy_pass                       http://localhost:4000;
+        # proxy_pass                       http://unix:/var/run/logger.sock;
     }
 
