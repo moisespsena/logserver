@@ -51,7 +51,7 @@ Usage of ./logserver:
 
 Your `serverUrl` config:
 
-```yaml
+```ini
 ...
 serverUrl = PROTO://HOST/sub/path
 ...
