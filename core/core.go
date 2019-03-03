@@ -188,7 +188,7 @@ func NewServer() (s *LogServer) {
 		FileProvider:        DefaultFileProvider,
 		RequestFileProvider: DefaultRequestFileProvider,
 		ServerAddr:          "0.0.0.0:4000",
-		ServerUrl:           "http://HOST",
+		ServerUrl:           "PROTO://HOST",
 		RootPath:            "./data",
 		SiteName:            "Log Server",
 		SiteTitle:           "Log Server",

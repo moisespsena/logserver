@@ -14,7 +14,18 @@ import (
 )
 
 func DefaultTemplateData(s *core.LogServer, ctx *macaron.Context) (rootUrl string) {
+	var proto = "http"
+	if origin := ctx.Req.Header.Get("Origin"); origin != "" {
+		if strings.HasPrefix(origin, "https") {
+			proto += "s"
+		}
+	} else if ctx.Req.TLS != nil {
+		proto += "s"
+	}
+
+	println(proto)
 	rootUrl = strings.Replace(s.ServerUrl, "HOST", ctx.Req.Host, 1) + s.Path
+	rootUrl = strings.Replace(rootUrl, "PROTO", proto, 1)
 	ctx.Data["srv"] = s
 	ctx.Data["ROOT_URL"] = rootUrl
 	ctx.Data["STATIC_URL"] = rootUrl + "/static"
