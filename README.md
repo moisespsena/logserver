@@ -47,3 +47,36 @@ Usage of ./logserver:
         Print Sample INI Config
 ```
 
+# Nginx Proxy Pass Example
+
+Your `serverUrl` config:
+
+```yaml
+...
+serverUrl = PROTO://HOST/sub/path
+...
+```
+
+Nginx conf:
+
+
+    location /sub/path/ws/ {
+        proxy_set_header X-Real-IP       $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade         websocket;
+        proxy_set_header Connection      upgrade;
+        proxy_set_header Host            $host:$server_port;
+        proxy_set_header Origin          $scheme://$host:$server_port;
+        proxy_http_version               1.1;
+        proxy_pass                       http://localhost:4000;
+    }
+
+    location /sub/path {
+        proxy_set_header X-Real-IP       $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header                 Host $host:$server_port;
+        proxy_set_header Origin          $scheme://$host:$server_port;
+        proxy_http_version               1.1;
+        proxy_pass                       http://localhost:4000;
+    }
+
